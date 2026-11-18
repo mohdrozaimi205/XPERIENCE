@@ -3,6 +3,5 @@
         <item name="android:windowBackground">#FF000000</item>
         <item name="android:statusBarColor">#FF000000</item>
         <item name="android:navigationBarColor">#FF000000</item>
-        <item name="android:windowFullscreen">true</item>
     </style>
 </resources>

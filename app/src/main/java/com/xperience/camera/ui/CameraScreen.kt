@@ -1,6 +1,14 @@
 package com.xperience.camera.ui
 
 import android.content.Context
+import android.content.res.Configuration
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.platform.LocalConfiguration
 import android.graphics.Bitmap
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.RenderEffect
@@ -120,15 +128,20 @@ fun CameraScreen(vm: CameraViewModel, onSettings: () -> Unit, onGallery: () -> U
 
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
-    val previewView = remember {
+    val orientation = LocalConfiguration.current.orientation
+    // PreviewView baru bagi setiap orientasi (elak paparan dipindah antara susun atur)
+    val previewView = remember(orientation) {
         PreviewView(ctx).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
     }
-    LaunchedEffect(s.aspect, s.format, s.front, s.lensId.substringBefore('@'), s.jpegQuality) { vm.bind(owner, previewView) }
-    LaunchedEffect(s.lookId, s.lookIntensity) {
+    LaunchedEffect(s.aspect, s.format, s.front, s.lensId.substringBefore('@'), s.jpegQuality, orientation) {
+        delay(60) // biar paparan selesai berputar
+        vm.bind(owner, previewView)
+    }
+    LaunchedEffect(s.lookId, s.lookIntensity, previewView) {
         if (Build.VERSION.SDK_INT >= 31) {
             val m = PreviewLook.matrix(s.lookId, s.lookIntensity)
             previewView.setRenderEffect(m?.let { RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(it)) })
@@ -139,100 +152,98 @@ fun CameraScreen(vm: CameraViewModel, onSettings: () -> Unit, onGallery: () -> U
     LaunchedEffect(err) { if (err != null) { delay(3500); vm.engine.clearError() } }
     LaunchedEffect(s.focus) { if (s.focus != FocusMode.MF) magnify = false }
 
+
     val eff = s.effective
     val manualOk = caps.manualSensor
+    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    Column(Modifier.fillMaxSize().background(XC.Bg).systemBarsPadding()) {
-        // ================= TOP BAR
-        Row(
-            Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconBtn(onClick = onSettings) { Icon(Icons.Outlined.Settings, "Tetapan", tint = XC.Text) }
-            val flashIcon = when (s.flash) {
-                FlashMode.OFF -> Icons.Outlined.FlashOff; FlashMode.AUTO -> Icons.Outlined.FlashAuto
-                FlashMode.ON -> Icons.Outlined.FlashOn; FlashMode.TORCH -> Icons.Outlined.FlashlightOn
-            }
-            IconBtn(enabled = caps.flash && !s.front, onClick = {
-                vm.update { it.copy(flash = FlashMode.entries[(it.flash.ordinal + 1) % FlashMode.entries.size]) }
-            }) { Icon(flashIcon, "Kilat", tint = if (caps.flash && !s.front) (if (s.flash != FlashMode.OFF) XC.Accent else XC.Text) else XC.Off) }
-            TopTag(s.format.label, s.format != FileFormat.JPEG) {
-                val opts = if (caps.raw && caps.supportsRawFormat) FileFormat.entries else listOf(FileFormat.JPEG)
-                vm.update { it.copy(format = opts[(opts.indexOf(it.format) + 1) % opts.size]) }
-                if (!(caps.raw && caps.supportsRawFormat)) vm.toast.value = "RAW (DNG) tidak disokong oleh kamera ini"
-            }
-            TopTag(s.aspect.label, false) { vm.update { it.copy(aspect = Aspect.entries[(it.aspect.ordinal + 1) % Aspect.entries.size]) } }
-            TopTag(if (s.dro == Dro.OFF) "DRO" else s.dro.label.removePrefix("DRO "), s.dro != Dro.OFF) {
-                vm.update { it.copy(dro = Dro.entries[(it.dro.ordinal + 1) % Dro.entries.size]) }
-            }
-            TopTag(gridIcon(s.grid), s.grid != Grid.OFF) { vm.update { it.copy(grid = Grid.entries[(it.grid.ordinal + 1) % Grid.entries.size]) } }
-            Spacer(Modifier.weight(1f))
-            if (processing > 0) Text("⟳$processing", color = XC.Accent, fontSize = 12.sp, modifier = Modifier.padding(end = 8.dp))
-            if (s.mode == ShootMode.MR) Text("MR${s.mrSlot}", color = XC.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 8.dp))
-            Battery()
+    // ---------- butang atas (Row dalam potret, Column dalam landskap)
+    val topButtons: @Composable () -> Unit = {
+        IconBtn(onClick = onSettings) { Icon(Icons.Outlined.Settings, "Tetapan", tint = XC.Text) }
+        val flashIcon = when (s.flash) {
+            FlashMode.OFF -> Icons.Outlined.FlashOff; FlashMode.AUTO -> Icons.Outlined.FlashAuto
+            FlashMode.ON -> Icons.Outlined.FlashOn; FlashMode.TORCH -> Icons.Outlined.FlashlightOn
         }
+        IconBtn(enabled = caps.flash && !s.front, onClick = {
+            vm.update { it.copy(flash = FlashMode.entries[(it.flash.ordinal + 1) % FlashMode.entries.size]) }
+        }) { Icon(flashIcon, "Kilat", tint = if (caps.flash && !s.front) (if (s.flash != FlashMode.OFF) XC.Accent else XC.Text) else XC.Off) }
+        TopTag(s.format.label, s.format != FileFormat.JPEG) {
+            val opts = if (caps.raw && caps.supportsRawFormat) FileFormat.entries else listOf(FileFormat.JPEG)
+            vm.update { it.copy(format = opts[(opts.indexOf(it.format) + 1) % opts.size]) }
+            if (!(caps.raw && caps.supportsRawFormat)) vm.toast.value = "RAW (DNG) tidak disokong oleh kamera ini"
+        }
+        TopTag(s.aspect.label, false) { vm.update { it.copy(aspect = Aspect.entries[(it.aspect.ordinal + 1) % Aspect.entries.size]) } }
+        TopTag(if (s.dro == Dro.OFF) "DRO" else s.dro.label.removePrefix("DRO "), s.dro != Dro.OFF) {
+            vm.update { it.copy(dro = Dro.entries[(it.dro.ordinal + 1) % Dro.entries.size]) }
+        }
+        TopTag(gridIcon(s.grid), s.grid != Grid.OFF) { vm.update { it.copy(grid = Grid.entries[(it.grid.ordinal + 1) % Grid.entries.size]) } }
+    }
+    val statusBits: @Composable () -> Unit = {
+        if (processing > 0) Text("⟳$processing", color = XC.Accent, fontSize = 12.sp, modifier = Modifier.padding(4.dp))
+        if (s.mode == ShootMode.MR) Text("MR${s.mrSlot}", color = XC.Accent, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(4.dp))
+        Battery()
+    }
 
-        // ================= VIEWFINDER
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+    // ---------- pemidang tilik
+    val viewfinder: @Composable () -> Unit = {
+        val ratio = if (landscape) s.aspect.h / s.aspect.w.toFloat() else s.aspect.w / s.aspect.h.toFloat()
+        Box(Modifier.aspectRatio(ratio).clipToBounds().background(Color(0xFF050505))) {
+            AndroidView(
+                factory = { previewView },
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    val k = if (magnify) 3f else 1f
+                    scaleX = k; scaleY = k
+                },
+            )
+            GridOverlay(s.grid)
+            AnalysisOverlay(stats, s.peaking && (s.focus == FocusMode.MF || magnify), s.highlightWarn, s.shadowWarn, s.front)
+            if (s.level) LevelOverlay()
+            focusPt?.let { FocusBox(it.x, it.y, live.afLocked) }
+            if (s.metering == Metering.SPOT && focusPt == null) Crosshair()
+            // gerak isyarat: ketik = fokus/meter, tekan lama = reset, cubit = zum
             Box(
-                Modifier.aspectRatio(s.aspect.w / s.aspect.h.toFloat()).clipToBounds().background(Color(0xFF050505)),
-            ) {
-                AndroidView(
-                    factory = { previewView },
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        val k = if (magnify) 3f else 1f
-                        scaleX = k; scaleY = k
-                    },
-                )
-                GridOverlay(s.grid)
-                AnalysisOverlay(stats, s.peaking && (s.focus == FocusMode.MF || magnify), s.highlightWarn, s.shadowWarn, s.front)
-                if (s.level) LevelOverlay()
-                focusPt?.let { FocusBox(it.x, it.y, live.afLocked) }
-                if (s.metering == Metering.SPOT && focusPt == null) Crosshair()
-                // gerak isyarat: ketik = fokus/meter, tekan lama = reset, cubit = zum
-                Box(
-                    Modifier.fillMaxSize()
-                        .pointerInput(s.focus) {
-                            detectTapGestures(
-                                onTap = { o ->
-                                    val nx = o.x / size.width; val ny = o.y / size.height
-                                    focusPt = Offset(nx, ny)
-                                    vm.engine.focusAt(nx, ny, false)
-                                },
-                                onLongPress = { focusPt = null; vm.engine.cancelFocus() },
-                                onDoubleTap = { if (s.focus == FocusMode.MF) magnify = !magnify },
-                            )
+                Modifier.fillMaxSize()
+                    .pointerInput(s.focus) {
+                        detectTapGestures(
+                            onTap = { o ->
+                                val nx = o.x / size.width; val ny = o.y / size.height
+                                focusPt = Offset(nx, ny)
+                                vm.engine.focusAt(nx, ny, false)
+                            },
+                            onLongPress = { focusPt = null; vm.engine.cancelFocus() },
+                            onDoubleTap = { if (s.focus == FocusMode.MF) magnify = !magnify },
+                        )
+                    }
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, _, zoom, _ ->
+                            if (zoom != 1f) vm.update { it.copy(zoom = (it.zoom * zoom).coerceIn(1f, 10f)) }
                         }
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, _, zoom, _ ->
-                                if (zoom != 1f) vm.update { it.copy(zoom = (it.zoom * zoom).coerceIn(1f, 10f)) }
-                            }
-                        }
-                )
-                if (s.histogram) Histogram(stats, Modifier.align(Alignment.TopStart).padding(8.dp))
-                // tag kiri atas: look + bokeh
-                Column(Modifier.align(Alignment.TopEnd).padding(8.dp), horizontalAlignment = Alignment.End) {
-                    Looks.byId(s.lookId)?.let { Tag(it.name) }
-                    if (s.bokeh) Tag("AI BOKEH f/${fmtF(s.aperture)}")
-                    if (aeLock) Tag("AEL", XC.Accent)
-                    if (live.wbCalibrating) Tag("WB kalibrasi…")
-                    if (s.zoom > 1.01f) Tag("×%.1f".format(vm.engine.zoomRatio(s)))
-                    if (magnify) Tag("MAGNIFIER ×3", XC.Accent)
-                }
-                if (eff != ShootMode.AUTO) ExposureScale(live.meterEv, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
-                if (countdown > 0) Text("$countdown", color = Color.White, fontSize = 88.sp, fontWeight = FontWeight.Light, modifier = Modifier.align(Alignment.Center))
-                if (shotsLeft > 0) Tag("● $shotsLeft", XC.Red, Modifier.align(Alignment.BottomStart).padding(8.dp))
-                if (blink) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.65f)))
-                (toast ?: err)?.let { msg ->
-                    Text(msg, color = Color.White, fontSize = 13.sp,
-                        modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(6.dp)).padding(horizontal = 14.dp, vertical = 9.dp))
-                }
+                    }
+            )
+            if (s.histogram) Histogram(stats, Modifier.align(Alignment.TopStart).padding(8.dp))
+            Column(Modifier.align(Alignment.TopEnd).padding(8.dp), horizontalAlignment = Alignment.End) {
+                Looks.byId(s.lookId)?.let { Tag(it.name) }
+                if (s.bokeh) Tag("AI BOKEH f/${fmtF(s.aperture)}")
+                if (aeLock) Tag("AEL", XC.Accent)
+                if (live.wbCalibrating) Tag("WB kalibrasi…")
+                if (s.zoom > 1.01f) Tag("×%.1f".format(vm.engine.zoomRatio(s)))
+                if (magnify) Tag("MAGNIFIER ×3", XC.Accent)
+            }
+            if (eff != ShootMode.AUTO) ExposureScale(live.meterEv, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp))
+            if (countdown > 0) Text("$countdown", color = Color.White, fontSize = 88.sp, fontWeight = FontWeight.Light, modifier = Modifier.align(Alignment.Center))
+            if (shotsLeft > 0) Tag("● $shotsLeft", XC.Red, Modifier.align(Alignment.BottomStart).padding(8.dp))
+            if (blink) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.65f)))
+            (toast ?: err)?.let { msg ->
+                Text(msg, color = Color.White, fontSize = 13.sp,
+                    modifier = Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(6.dp)).padding(horizontal = 14.dp, vertical = 9.dp))
             }
         }
+    }
 
-        // ================= INFO STRIP (gaya Alpha)
+    // ---------- jalur maklumat gaya Alpha
+    val infoStrip: @Composable () -> Unit = {
         Row(
-            Modifier.fillMaxWidth().background(XC.Panel).padding(horizontal = 4.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().background(XC.Panel).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
@@ -250,19 +261,15 @@ fun CameraScreen(vm: CameraViewModel, onSettings: () -> Unit, onGallery: () -> U
             Info("WB", if (s.wb == WbMode.KELVIN) "${s.kelvin}K" else s.wb.short, active == Param.WB, eff != ShootMode.AUTO) { active = Param.WB }
             Info("FOCUS", s.focus.label, active == Param.FOCUS, true) { active = Param.FOCUS }
         }
-        Row(Modifier.fillMaxWidth().background(XC.Panel).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().background(XC.Panel).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Info("METER", s.metering.icon + " " + s.metering.label, active == Param.METER, eff != ShootMode.AUTO) { active = Param.METER }
             Info("LOOK", Looks.byId(s.lookId)?.let { shortLook(it.id, it.name) } ?: "OFF", active == Param.LOOK, true) { active = Param.LOOK }
             Info("DRIVE", driveShort(s.drive), active == Param.DRIVE, true) { active = Param.DRIVE }
         }
+    }
 
-        // ================= PANEL KAWALAN
-        Box(Modifier.fillMaxWidth().height(112.dp).background(XC.Panel2)) {
-            ControlPanel(active, vm, onMagnify = { magnify = it }, magnify = magnify)
-        }
-
-        // ================= MOD + KANTA
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    val modeRow: @Composable () -> Unit = {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             for (m in ShootMode.entries) {
                 val enabled = manualOk || m == ShootMode.AUTO || m == ShootMode.P || m == ShootMode.MR
                 val sel = s.mode == m
@@ -278,8 +285,10 @@ fun CameraScreen(vm: CameraViewModel, onSettings: () -> Unit, onGallery: () -> U
                     }.padding(horizontal = 9.dp, vertical = 4.dp),
                 )
             }
-            Spacer(Modifier.weight(1f))
         }
+    }
+
+    val lensRow: @Composable () -> Unit = {
         if (!s.front && lenses.isNotEmpty()) {
             LazyRow(
                 Modifier.fillMaxWidth().height(34.dp),
@@ -298,10 +307,11 @@ fun CameraScreen(vm: CameraViewModel, onSettings: () -> Unit, onGallery: () -> U
                 }
             }
         }
+    }
 
-        // ================= BAWAH: galeri / AEL / shutter / AF-ON / tukar kamera
+    val bottomRow: @Composable () -> Unit = {
         Row(
-            Modifier.fillMaxWidth().height(96.dp).padding(horizontal = 18.dp),
+            Modifier.fillMaxWidth().height(if (landscape) 84.dp else 96.dp).padding(horizontal = if (landscape) 8.dp else 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -318,6 +328,53 @@ fun CameraScreen(vm: CameraViewModel, onSettings: () -> Unit, onGallery: () -> U
             }
         }
     }
+
+    val safe = Modifier.fillMaxSize().background(XC.Bg).windowInsetsPadding(WindowInsets.safeDrawing)
+    if (landscape) {
+        // ================= LANDSKAP (gaya Photo Pro: pemidang kiri, kawalan kanan)
+        Row(safe) {
+            Column(
+                Modifier.width(56.dp).fillMaxHeight().padding(vertical = 6.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                topButtons()
+                Spacer(Modifier.weight(1f))
+                statusBits()
+            }
+            Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) { viewfinder() }
+            Column(Modifier.width(330.dp).fillMaxHeight()) {
+                infoStrip()
+                Box(Modifier.fillMaxWidth().weight(1f).background(XC.Panel2)) {
+                    ControlPanel(active, vm, onMagnify = { magnify = it }, magnify = magnify)
+                }
+                modeRow()
+                lensRow()
+                bottomRow()
+            }
+        }
+    } else {
+        // ================= POTRET
+        Column(safe.padding(top = 6.dp)) {
+            Row(
+                Modifier.fillMaxWidth().height(46.dp).padding(horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                topButtons()
+                Spacer(Modifier.weight(1f))
+                statusBits()
+            }
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { viewfinder() }
+            infoStrip()
+            Box(Modifier.fillMaxWidth().height(112.dp).background(XC.Panel2)) {
+                ControlPanel(active, vm, onMagnify = { magnify = it }, magnify = magnify)
+            }
+            modeRow()
+            lensRow()
+            bottomRow()
+        }
+    }
+
 
     if (showMr) MrDialog(vm) { showMr = false }
 }

@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -46,7 +48,7 @@ fun SettingsScreen(vm: CameraViewModel, version: String, onCheckUpdate: () -> Un
     val caps by vm.engine.caps.collectAsState()
     fun u(f: (CamSettings) -> CamSettings) = vm.update(f)
 
-    Column(Modifier.fillMaxSize().background(XC.Bg).systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(XC.Bg).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 4.dp)) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconBtn(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Kembali", tint = XC.Text) }
             Text("MENU", color = XC.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold)

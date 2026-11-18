@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -73,7 +75,7 @@ fun GalleryScreen(vm: CameraViewModel, onBack: () -> Unit) {
         return
     }
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(XC.Bg).systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(XC.Bg).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 4.dp)) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconBtn(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Kembali", tint = XC.Text) }
             Text("GALERI XPERIENCE", color = XC.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
@@ -143,7 +145,7 @@ private fun Viewer(vm: CameraViewModel, uri: Uri, onClose: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().background(XC.Bg).systemBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(XC.Bg).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 4.dp)) {
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconBtn(onClick = onClose) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Kembali", tint = XC.Text) }
             Spacer(Modifier.weight(1f))

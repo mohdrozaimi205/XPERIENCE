@@ -235,7 +235,7 @@ class CameraEngine(private val ctx: Context) {
         val sameView = view === previewView
         previewView = view
         val p = ensureProvider()
-        if (!needsRebind(bound, s) && camera != null && sameView) { applyAll(); return }
+        if (!needsRebind(bound, s) && camera != null && sameView && boundRotation == (view.display?.rotation ?: displayRotation())) { applyAll(); return }
         p.unbindAll()
         camera = null
         val selector = selectorFor(s)
@@ -245,7 +245,10 @@ class CameraEngine(private val ctx: Context) {
         val ratio = if (s.aspect == Aspect.R16_9) AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
         else AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
 
-        val previewB = Preview.Builder().setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio).build())
+        val rot = view.display?.rotation ?: displayRotation()
+        boundRotation = rot
+        val sideways = rot == Surface.ROTATION_90 || rot == Surface.ROTATION_270
+        val previewB = Preview.Builder().setTargetRotation(rot).setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio).build())
         Camera2Interop.Extender(previewB).setSessionCaptureCallback(resultCallback)
         val preview = previewB.build().also { it.setSurfaceProvider(view.surfaceProvider) }
 
@@ -261,6 +264,7 @@ class CameraEngine(private val ctx: Context) {
             _error.value = "RAW tidak disokong kamera ini — disimpan sebagai JPEG"
 
         val capB = ImageCapture.Builder()
+            .setTargetRotation(rot)
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .setJpegQuality(s.jpegQuality.coerceIn(60, 100))
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio)
@@ -270,13 +274,14 @@ class CameraEngine(private val ctx: Context) {
         val capture = capB.build()
 
         val analysis = ImageAnalysis.Builder()
+            .setTargetRotation(rot)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio)
                 .setResolutionStrategy(ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)).build())
             .build()
         analysis.setAnalyzer(analysisExec, FrameAnalyzer({ settings }, { spot }) { st -> onStats(st) })
 
-        val vp = ViewPort.Builder(Rational(s.aspect.w, s.aspect.h), view.display?.rotation ?: Surface.ROTATION_0)
+        val vp = ViewPort.Builder(if (sideways) Rational(s.aspect.h, s.aspect.w) else Rational(s.aspect.w, s.aspect.h), rot)
             .setScaleType(ViewPort.FILL_CENTER).build()
         val group = UseCaseGroup.Builder().setViewPort(vp).addUseCase(preview).addUseCase(capture).addUseCase(analysis).build()
 
@@ -287,7 +292,7 @@ class CameraEngine(private val ctx: Context) {
             // Sesetengah peranti tidak sokong gabungan RAW + analisis — cuba semula dengan JPEG
             try {
                 p.unbindAll()
-                val b2 = ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                val b2 = ImageCapture.Builder().setTargetRotation(rot).setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                     .setJpegQuality(s.jpegQuality.coerceIn(60, 100))
                 Camera2Interop.Extender(b2).setSessionCaptureCallback(resultCallback)
                 val cap2 = b2.build()
@@ -305,6 +310,13 @@ class CameraEngine(private val ctx: Context) {
         readCaps(info, rawOk || rawJpegOk)
         applyAll()
     }
+
+    private var boundRotation = -1
+
+    @Suppress("DEPRECATION")
+    private fun displayRotation(): Int = try {
+        (ctx.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.rotation
+    } catch (_: Exception) { Surface.ROTATION_0 }
 
     fun unbind() { provider?.unbindAll(); camera = null; bound = null }
 
@@ -460,7 +472,12 @@ class CameraEngine(private val ctx: Context) {
         val act = try { cm.getCameraCharacteristics(caps.value.cameraId).get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) } catch (_: Exception) { null } ?: return null
         // titik paparan (potret) -> koordinat sensor (landskap, putaran 90)
         val (vx, vy) = spot ?: (0.5f to 0.5f)
-        val sx = vy; val sy = 1f - vx
+        val (sx, sy) = when (boundRotation) {
+            Surface.ROTATION_90 -> vx to vy
+            Surface.ROTATION_270 -> (1f - vx) to (1f - vy)
+            Surface.ROTATION_180 -> (1f - vy) to vx
+            else -> vy to (1f - vx)
+        }
         val half = if (s.metering == Metering.SPOT) 0.04f else 0.18f
         val l = ((sx - half).coerceIn(0f, 1f) * act.width()).toInt()
         val t = ((sy - half).coerceIn(0f, 1f) * act.height()).toInt()
